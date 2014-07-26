@@ -1,0 +1,13 @@
+{application, red_db,
+ [
+  {description, ""},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+		  		        ranch
+                 ]},
+  {mod, { red_db_app, []}},
+  {env, []}
+ ]}.
