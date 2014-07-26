@@ -1,4 +1,4 @@
-{application, red_db,
+{application, fog,
  [
   {description, ""},
   {vsn, "1.0.0"},
@@ -6,8 +6,8 @@
   {applications, [
                   kernel,
                   stdlib,
-		  		        ranch
+		  		  ranch
                  ]},
-  {mod, { red_db_app, []}},
+  {mod, { fog_app, []}},
   {env, []}
  ]}.

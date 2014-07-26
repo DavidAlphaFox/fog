@@ -1,5 +1,5 @@
 
--module(red_db_sup).
+-module(fog_sup).
 
 -behaviour(supervisor).
 
@@ -25,10 +25,6 @@ start_link() ->
 
 init([]) ->
 	RestartStrategy = {one_for_one, 5, 10},
-	Count = red_config:get(max_db),
-  Children =
-    [{red_db:db(I), {red_db, start_link, [I]},
-      permanent, brutal_kill, worker, [red_db]}
-     || I <- lists:seq(0, Count - 1)],
+	Children = [],
     {ok, { RestartStrategy,Children} }.
 
