@@ -249,7 +249,7 @@ remote_close(ID)->
 		[{ID,Pid}] ->
 			ets:delete(multiplex_mapper,ID),
 			hm_misc:demonitor(Pid,multiplex_monitor),
-  		socks_protocol:close(Pid),
+  		Pid ! {remote_close},
   		ok
   end.
 to_client(ID,Bin)->
@@ -257,7 +257,7 @@ to_client(ID,Bin)->
 		[] ->
 			ok;
 		[{ID,Pid}] ->
-  		socks_protocol:to_client(Pid,Bin),
+  		Pid ! {to_client,Bin},
   		ok
   end.
 

@@ -14,10 +14,6 @@
 -define(CMD_BIND, 16#02).
 -define(CMD_UDP_ASSOCIATE,  16#03).
 
--define(AUTH_NOAUTH, 16#00).
--define(AUTH_GSAPI, 16#01).
--define(AUTH_USERNAME, 16#02).
--define(AUTH_UNDEF, 16#FF).
 
 -define(REP_SUCCESS, 16#00).
 -define(REP_SERVER_ERROR, 16#01).
@@ -30,10 +26,8 @@
 -define(REP_ATYP_NOSUPPORTED, 16#08).
 -define(REP_UNDEF, 16#FF).
 
-process(#state{socks5 = Socks5} = _State) when Socks5 == false ->
-    lager:error("SOCKS5 unsupported."),
-    socks5_not_supported;
-process(#state{socks5 = Socks5} = State) when Socks5 == true ->
+
+process(State) ->
     try auth(State)
     catch 
         _:Reason ->
@@ -79,17 +73,18 @@ cmd(#state{transport = Transport, incoming_socket = ISocket} = State) ->
                                                    State#state.client_port, Reason])
     end.
 
-doCmd(?CMD_CONNECT, ATYP, #state{transport = Transport, incoming_socket = ISocket} = State) ->
+doCmd(?CMD_CONNECT, ATYP, #state{transport = Transport, incoming_socket = ISocket,id = ID} = State) ->
     {ok, Data} = get_address_port(ATYP, Transport, ISocket),
     {Addr, Port} = parse_addr_port(ATYP, Data),
-    {ok, OSocket} = socks_protocol:connect(Transport, Addr, Port),
+    Pid = self(),
+    fog_multiplex:fetch(Pid,ID,Addr,Port),
     lager:info("~p:~p connected to ~p:~p", [socks_protocol:pretty_address(State#state.client_ip), 
                                             State#state.client_port,
                                             socks_protocol:pretty_address(Addr), Port]),
     {ok, {BAddr, BPort}} = inet:sockname(ISocket),
     BAddr2 = list_to_binary(tuple_to_list(BAddr)),
     ok = Transport:send(ISocket, <<?VERSION, ?REP_SUCCESS, ?RSV, ?IPV4, BAddr2/binary, BPort:16>>),
-    {ok, State#state{outgoing_socket = OSocket}};
+    {ok, State};
 
 doCmd(Cmd, _, State) ->
     lager:error("Command ~p not implemented yet", [Cmd]),
@@ -100,8 +95,10 @@ doCmd(Cmd, _, State) ->
 %%%===================================================================
 get_address_port(ATYP, Transport, Socket) ->
     case ATYP of
-        ?IPV4 -> Transport:recv(Socket, 6, ?TIMEOUT);
-        ?IPV6 -> Transport:recv(Socket, 18, ?TIMEOUT);
+        ?IPV4 -> 
+            Transport:recv(Socket, 6, ?TIMEOUT);
+        ?IPV6 -> 
+            Transport:recv(Socket, 18, ?TIMEOUT);
         ?DOMAIN ->
             {ok, <<DLen>>} = Transport:recv(Socket, 1, ?TIMEOUT),
             {ok, AddrPort} = Transport:recv(Socket, DLen+2, ?TIMEOUT),
@@ -110,8 +107,8 @@ get_address_port(ATYP, Transport, Socket) ->
     end.
 
 parse_addr_port(?IPV4, <<Addr:4/binary, Port:16>>) ->
-    {list_to_tuple(binary_to_list(Addr)), Port};
+    {Addr, Port};
 parse_addr_port(?IPV6, <<Addr:16/binary, Port:16>>) ->
-    {list_to_tuple(binary_to_list(Addr)), Port};
+    {Addr, Port};
 parse_addr_port(?DOMAIN, <<Len, Addr:Len/binary, Port:16>>) ->
-    {binary_to_list(Addr), Port}.
+    {Addr, Port}.

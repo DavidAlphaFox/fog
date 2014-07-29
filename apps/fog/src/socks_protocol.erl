@@ -2,7 +2,6 @@
 
 -behavior(ranch_protocol).
 
-%% ranch_protocol callbacks
 -export([start_link/4, 
          init/4]).
 
@@ -17,51 +16,43 @@ start_link(Ref, Socket, Transport, Opts) ->
     {ok, Pid}.
 
 init(Ref, Socket, Transport, Opts) ->
-    AuthMethods = proplists:get_value(auth, Opts),
-    Protocols = proplists:get_value(protocols, Opts),
     ok = ranch:accept_ack(Ref),
     {ok, {Addr, Port}} = inet:peername(Socket),
-    State = #state{auth_methods = AuthMethods, 
-                   socks4 = lists:member(socks4, Protocols),
-                   socks5 = lists:member(socks5, Protocols),
+    ID = generator_worker:gen_id(),
+    State = #state{
+                   auth_methods = [?AUTH_NOAUTH], 
                    transport = Transport, 
                    client_ip = Addr,
                    client_port = Port,
-                   incoming_socket = Socket},
+                   incoming_socket = Socket,
+                   id = ID
+                },
     {ok, <<Version>>} = Transport:recv(Socket, 1, ?TIMEOUT),
     case Version of
-        ?VERSION5 -> loop(socks5:process(State));
-        ?VERSION4 -> loop(socks4:process(State));
+        ?VERSION5 -> 
+            loop(socks5:process(State));
         _ -> 
             Transport:close(Socket),
             lager:error("Unsupported SOCKS version ~p", [Version])
     end.
 
-loop(#state{transport = Transport, incoming_socket = ISocket, outgoing_socket = OSocket} = State) ->
+loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) ->
     inet:setopts(ISocket, [{active, once}]),
-    inet:setopts(OSocket, [{active, once}]),
     {OK, Closed, Error} = Transport:messages(),
     receive
         {OK, ISocket, Data} ->
-            Transport:send(OSocket, Data),
+            fog_multiplex:to_princess(ID, Data),
             ?MODULE:loop(State);
-        {OK, OSocket, Data} ->
+        {to_client,Data} ->
             Transport:send(ISocket, Data),
             ?MODULE:loop(State);
         {Closed, ISocket} ->
-            lager:info("~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]),
-            Transport:close(OSocket);
-        {Closed, OSocket} ->
-            lager:info("~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]),
+            lager:info("~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]);
+        {remote_close} ->
             Transport:close(ISocket);
         {Error, ISocket, Reason} ->
             lager:error("incoming socket: ~p", [Reason]),
-            lager:info("~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]),
-            Transport:close(OSocket);
-        {Error, OSocket, Reason} ->
-            lager:error("outgoing socket: ~p", [Reason]),
-            lager:info("~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]),
-            Transport:close(ISocket)
+            lager:info("~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port])
     end.
 
 connect(Transport, Addr, Port) ->

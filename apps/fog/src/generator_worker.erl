@@ -22,7 +22,7 @@
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
                             terminate/2, code_change/3]).
--export ([gen_id/1,worker_id/1,node_id/1]).
+-export ([gen_id/0]).
 
 %-define (EPOCH,1356998400974295).%2013-1-1 0:0:0 {1356,998400,974295} microseconds
 
@@ -38,20 +38,15 @@
 start_link(Args)->
     PartitionInteger = proplists:get_value(partition,Args),
 	NodeIntger = proplists:get_value(node_id,Args),
-    Name = erlang:list_to_atom(lists:concat(["generator_worker","_",PartitionInteger])),
-    gen_server:start_link({local,Name},?MODULE,{NodeIntger,PartitionInteger},[]).
+    gen_server:start_link({local,?MODULE},?MODULE,{NodeIntger,PartitionInteger},[]).
 
 %%%
 %%% API
 %%%
 
-gen_id(Server)->
-    gen_server:call(Server,gen_id).
+gen_id()->
+    gen_server:call(?MODULE,gen_id).
 
-worker_id(Server)->
-    gen_server:call(Server,worker_id).
-node_id(Server)->
-    gen_server:call(Server,node_id).
 %%%
 %%% gen_server callback
 %%%
@@ -75,10 +70,7 @@ init(Args)->
                 sequence = 0,
                 last_timestamp = TS}}
 	end.
-handle_call(worker_id,_From,#state{worker_id = WorkerID} = State)->
-    {reply,WorkerID,State};
-handle_call(node_id,_From,#state{node_id = NodeID} = State)->
-    {reply,NodeID,State};
+
 handle_call(gen_id,From, #state{last_timestamp = TS, sequence = Seq, partition = Partition} = State) ->
     case get_next_seq(TS, Seq) of
         backwards_clock ->
