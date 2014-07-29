@@ -270,11 +270,11 @@ packet([<<0:64/integer,0:32/integer>>|T],State)->
 	packet(T,NewState);
 
 packet([<<ID:64/integer,2:32/integer,Rest/bits>>|T],State)->
-	lager:log(info,?MODULE,"free->->client~n"),
+	lager:log(info,?MODULE,"free->->client:~p~n",[ID]),
 	to_client(ID,Rest),
 	packet(T,State);
 packet([<<ID:64/integer,3:32/integer,_Rest/bits>>|T],State)->
-	lager:log(info,?MODULE,"free close~n"),
+	lager:log(info,?MODULE,"close id:~p~n",[ID]),
 	remote_close(ID),
 	packet(T,State).
 
