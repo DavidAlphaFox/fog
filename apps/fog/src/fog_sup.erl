@@ -17,7 +17,7 @@
 %% ===================================================================
 
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 %% ===================================================================
 %% Supervisor callbacks
@@ -25,6 +25,8 @@ start_link() ->
 
 init([]) ->
 	RestartStrategy = {one_for_one, 5, 10},
-	Children = [],
-    {ok, { RestartStrategy,Children} }.
+	GeneratorMFA = {generator_worker, start_link, [[{partition,0},{node_id,0}]]},                                                                
+ 	GeneratorWorker = {generator_worker,GeneratorMFA,permanent,5000,worker,[]}, 
+	Children = [GeneratorWorker],
+  {ok, { RestartStrategy,Children} }.
 

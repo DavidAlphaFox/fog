@@ -9,14 +9,17 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
-	Port = fog_config:get(port),
-	MaxWorker = fog_config:get(max_worker),
-	AcceptorWorker = fog_config:get(acceptor_worker),
-	{ok, _} = ranch:start_listener(fog,AcceptorWorker,
-                ranch_tcp, [{port, Port}], socks_protocol, []),
-	ranch:set_max_connections(fog,MaxWorker),
+	start_socks(),
 	fog_sup:start_link().
 
 stop(_State) ->
   ok.
 
+start_socks()->
+	SocksConf = fog_config:get(socks),
+	Port = proplists:get_value(port,SocksConf),
+	MaxWorker = proplists:get_value(max_worker,SocksConf),
+	AcceptorWorker = proplists:get_value(acceptor_worker,SocksConf),
+	{ok, _} = ranch:start_listener(fog_socks,AcceptorWorker,
+                ranch_tcp, [{port, Port}], socks_protocol, []),
+	ranch:set_max_connections(fog_socks,MaxWorker).
