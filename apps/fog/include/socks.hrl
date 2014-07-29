@@ -9,6 +9,7 @@
 
 -define(TIMEOUT, timer:seconds(5)).
 -define(AUTH_NOAUTH, 16#00).
+-define(AUTH_UNDEF, 16#FF).
 
 -define(VERSION4, 16#04).
 -define(VERSION5, 16#05).

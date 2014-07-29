@@ -33,7 +33,7 @@ process(State) ->
         _:Reason ->
             Transport = State#state.transport,
             Transport:close(State#state.incoming_socket),
-            lager:error("Auth error ~p", [Reason])
+            lager:log(error,?MODULE,"Auth error ~p", [Reason])
     end.
 
 auth(#state{transport = Transport, incoming_socket = ISocket} = State) ->
@@ -45,18 +45,18 @@ doAuth(Data, #state{auth_methods = AuthMethods, transport = Transport, incoming_
     OfferAuthMethods = binary_to_list(Data),
     Addr = State#state.client_ip,
     Port = State#state.client_port,
-    lager:info("~p:~p offers authentication methods: ~p", [socks_protocol:pretty_address(Addr),
+    lager:log(info,?MODULE,"~p:~p offers authentication methods: ~p", [socks_protocol:pretty_address(Addr),
                                                            Port, OfferAuthMethods]),
     [Method | _] = lists:filter(fun(E) -> lists:member(E, OfferAuthMethods) end, AuthMethods),
     % only no authentication support now
     case Method of
         ?AUTH_NOAUTH -> 
             Transport:send(ISocket, <<?VERSION, Method>>),
-            lager:info("~p:~p Authorized with ~p type", [socks_protocol:pretty_address(Addr), Port, Method]),
+            lager:log(info,?MODULE,"~p:~p Authorized with ~p type", [socks_protocol:pretty_address(Addr), Port, Method]),
             cmd(State);
         _ ->
             Transport:send(ISocket, <<?VERSION, ?AUTH_UNDEF>>),
-            lager:error("~p:~p Authorization method (~p) not supported", [socks_protocol:pretty_address(Addr),
+            lager:log(error,?MODULE,"~p:~p Authorization method (~p) not supported", [socks_protocol:pretty_address(Addr),
                                                                           Port, OfferAuthMethods]),
             throw(auth_not_supported)
     end.
@@ -69,7 +69,7 @@ cmd(#state{transport = Transport, incoming_socket = ISocket} = State) ->
     catch 
         _:Reason ->
             ok = Transport:close(ISocket),
-            lager:error("~p:~p command error ~p", [socks_protocol:pretty_address(State#state.client_ip), 
+            lager:log(error,?MODULE,"~p:~p command error ~p", [socks_protocol:pretty_address(State#state.client_ip), 
                                                    State#state.client_port, Reason])
     end.
 
@@ -78,7 +78,7 @@ doCmd(?CMD_CONNECT, ATYP, #state{transport = Transport, incoming_socket = ISocke
     {Addr, Port} = parse_addr_port(ATYP, Data),
     Pid = self(),
     fog_multiplex:fetch(Pid,ID,Addr,Port),
-    lager:info("~p:~p connected to ~p:~p", [socks_protocol:pretty_address(State#state.client_ip), 
+    lager:log(info,?MODULE,"~p:~p connected to ~p:~p", [socks_protocol:pretty_address(State#state.client_ip), 
                                             State#state.client_port,
                                             socks_protocol:pretty_address(Addr), Port]),
     {ok, {BAddr, BPort}} = inet:sockname(ISocket),
@@ -87,7 +87,7 @@ doCmd(?CMD_CONNECT, ATYP, #state{transport = Transport, incoming_socket = ISocke
     {ok, State};
 
 doCmd(Cmd, _, State) ->
-    lager:error("Command ~p not implemented yet", [Cmd]),
+    lager:log(error,?MODULE,"Command ~p not implemented yet", [Cmd]),
     {ok, State}.
 
 %%%===================================================================

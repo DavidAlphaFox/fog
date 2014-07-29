@@ -15,7 +15,7 @@ start_link(Ref, Socket, Transport, Opts) ->
     Pid = spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
     {ok, Pid}.
 
-init(Ref, Socket, Transport, Opts) ->
+init(Ref, Socket, Transport, _Opts) ->
     ok = ranch:accept_ack(Ref),
     {ok, {Addr, Port}} = inet:peername(Socket),
     ID = generator_worker:gen_id(),
@@ -33,7 +33,7 @@ init(Ref, Socket, Transport, Opts) ->
             loop(socks5:process(State));
         _ -> 
             Transport:close(Socket),
-            lager:error("Unsupported SOCKS version ~p", [Version])
+            lager:log(error,?MODULE,"Unsupported SOCKS version ~p", [Version])
     end.
 
 loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) ->
@@ -47,12 +47,12 @@ loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) -
             Transport:send(ISocket, Data),
             ?MODULE:loop(State);
         {Closed, ISocket} ->
-            lager:info("~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]);
+            lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]);
         {remote_close} ->
             Transport:close(ISocket);
         {Error, ISocket, Reason} ->
-            lager:error("incoming socket: ~p", [Reason]),
-            lager:info("~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port])
+            lager:log(error,?MODULE,"incoming socket: ~p", [Reason]),
+            lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port])
     end.
 
 connect(Transport, Addr, Port) ->
