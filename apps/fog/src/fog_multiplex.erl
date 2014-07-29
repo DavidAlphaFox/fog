@@ -131,6 +131,7 @@ handle_info(timeout,#state{connected = true,heart_beat = HeartBeat,miss = Miss,s
 				ranch_ssl:close(Socket),
 				State#state{connected = false,miss = 0,socket = undefined};
 			true -> 
+				ranch_ssl:send(Socket,<<"ping">>),
 	 			State#state{miss = Miss + 1}
 	 		end,
 	{noreply,NewState,HeartBeat};
