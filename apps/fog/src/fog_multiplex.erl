@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -19,7 +19,13 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {}).
+-record(state, {
+	ip,
+	port,
+	connected,
+	heart_beat,
+	miss
+	}).
 
 %%%===================================================================
 %%% API
@@ -29,11 +35,14 @@
 %% @doc
 %% Starts the server
 %%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
+%% @spec start_link(Args) -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-	gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Args) ->
+	IP = proplists:get_value(ip,Args),
+	Port = proplists:get_value(port,Args),
+	HeartBeat = proplists:get_value(heart_beat,Args),
+	gen_server:start_link({local, ?SERVER}, ?MODULE, {IP,Port,HeartBeat}, []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -50,8 +59,15 @@ start_link() ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([]) ->
-	{ok, #state{}}.
+init({IP,Port,HeartBeat}) ->
+	State = #state{
+		ip = IP,
+		port = Port,
+		connected = false,
+		heart_beat = HeartBeat,
+		miss = 0
+	},
+	{ok,State,0}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -94,6 +110,16 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_info(timeout,#state{ip = IP,port = Port,connected = false,heart_beat = HeartBeat} = State )->
+	lager:log(info,?MODULE,"Try to connect to ~s:~p~n",[IP,Port]),
+	NewState = State#state{connected = true},
+	{noreply,NewState,HeartBeat};
+
+handle_info(timeout,#state{connected = true,heart_beat = HeartBeat,miss = Miss} = State)->
+	lager:log(info,?MODULE,"Heart Beat"),
+	NewState = State#state{miss = Miss + 1},
+	{noreply,NewState,HeartBeat};
+
 handle_info(_Info, State) ->
 	{noreply, State}.
 
