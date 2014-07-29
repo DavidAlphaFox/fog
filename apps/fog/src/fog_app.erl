@@ -9,6 +9,7 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
+	lager:start(),
 	start_socks(),
 	fog_sup:start_link().
 
