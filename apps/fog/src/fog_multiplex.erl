@@ -24,7 +24,8 @@
 	port,
 	connected,
 	heart_beat,
-	miss
+	miss,
+	socket
 	}).
 
 %%%===================================================================
@@ -65,7 +66,8 @@ init({IP,Port,HeartBeat}) ->
 		port = Port,
 		connected = false,
 		heart_beat = HeartBeat,
-		miss = 0
+		miss = 0,
+		socket = undefined
 	},
 	{ok,State,0}.
 
@@ -112,12 +114,25 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 handle_info(timeout,#state{ip = IP,port = Port,connected = false,heart_beat = HeartBeat} = State )->
 	lager:log(info,?MODULE,"Try to connect to ~s:~p~n",[IP,Port]),
-	NewState = State#state{connected = true},
+	Result = ranch_ssl:connect(IP,Port,[]),
+	NewState = case Result of
+		{ok,Socket}->
+			State#state{connected = true,socket = Socket};
+		{error,Error}->
+			lager:log(info,?MODULE,"Connect to ~s:~p fail. Reason: ~p~n",[IP,Port,Error]),
+			State
+		end,
 	{noreply,NewState,HeartBeat};
 
-handle_info(timeout,#state{connected = true,heart_beat = HeartBeat,miss = Miss} = State)->
+handle_info(timeout,#state{connected = true,heart_beat = HeartBeat,miss = Miss,socket = Socket} = State)->
 	lager:log(info,?MODULE,"Heart Beat"),
-	NewState = State#state{miss = Miss + 1},
+	NewState = if 
+			Miss > 2 ->
+				ranch_ssl:close(Socket),
+				State#state{connected = false,miss = 0,socket = undefined};
+			true -> 
+	 			State#state{miss = Miss + 1}
+	 		end,
 	{noreply,NewState,HeartBeat};
 
 handle_info(_Info, State) ->
