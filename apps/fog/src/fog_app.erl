@@ -10,8 +10,10 @@
 
 start(_StartType, _StartArgs) ->
 	lager:start(),
-	application:start(crypto),
-	application:start(ssl),
+	ok = application:start(crypto),
+	ok = application:start(asn1),
+	ok = application:start(public_key),
+	ok = application:start(ssl),
 	application:start(ranch),
 	start_socks(),
 	fog_sup:start_link().
