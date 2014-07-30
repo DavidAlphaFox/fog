@@ -27,13 +27,18 @@ init(Ref, Socket, Transport, _Opts) ->
                    incoming_socket = Socket,
                    id = ID
                 },
-    {ok, <<Version>>} = Transport:recv(Socket, 1, ?TIMEOUT),
-    case Version of
-        ?VERSION5 -> 
-            loop(socks5:process(State));
-        _ -> 
-            Transport:close(Socket),
-            lager:log(error,?MODULE,"Unsupported SOCKS version ~p", [Version])
+    R = Transport:recv(Socket, 1, ?TIMEOUT),
+    case R of
+        {ok,<<Version>>}->
+            case Version of
+                ?VERSION5 -> 
+                    loop(socks5:process(State));
+            _ -> 
+                Transport:close(Socket),
+                lager:log(error,?MODULE,"Unsupported SOCKS version ~p", [Version])
+            end;
+        {error,Reason}->
+            lager:log(error,?MODULE,"SOCKS Closed")
     end.
 
 loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) ->
