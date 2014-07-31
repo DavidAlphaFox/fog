@@ -98,7 +98,8 @@ get_address_port(ATYP, Transport, Socket) ->
         ?IPV4 -> 
             Transport:recv(Socket, 6, ?TIMEOUT);
         ?IPV6 -> 
-            Transport:recv(Socket, 18, ?TIMEOUT);
+           % Transport:recv(Socket, 18, ?TIMEOUT);
+           throw(address_not_supported);
         ?DOMAIN ->
             {ok, <<DLen>>} = Transport:recv(Socket, 1, ?TIMEOUT),
             {ok, AddrPort} = Transport:recv(Socket, DLen+2, ?TIMEOUT),
@@ -107,8 +108,8 @@ get_address_port(ATYP, Transport, Socket) ->
     end.
 
 parse_addr_port(?IPV4, <<Addr:4/binary, Port:16>>) ->
-    {Addr, Port};
+    {{?IPV4,Addr}, Port};
 parse_addr_port(?IPV6, <<Addr:16/binary, Port:16>>) ->
-    {Addr, Port};
+    {{?IPV6,Addr}, Port};
 parse_addr_port(?DOMAIN, <<Len, Addr:Len/binary, Port:16>>) ->
-    {Addr, Port}.
+    {{?DOMAIN,Addr}, Port}.

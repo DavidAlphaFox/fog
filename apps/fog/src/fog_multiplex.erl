@@ -93,9 +93,10 @@ init({IP,Port,HeartBeat}) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call({fetch,Pid,ID,Address,Port},_From,#state{heart_beat = HeartBeat,socket = Socket} = State)->
-	Addr = <<Address/binary>>,
+	{AType,Address2} = Address,
+	Addr = <<Address2/binary>>,
 	AddrLen = erlang:byte_size(Addr), 
-	Data = <<AddrLen:32/big,Addr/binary,Port:16/big>>,
+	Data = <<AType:8,AddrLen:32/big,Addr/binary,Port:16/big>>,
 	Packet = pack(ID,1,Data),
 	Result = ranch_ssl:send(Socket,Packet),
 	case Result of
