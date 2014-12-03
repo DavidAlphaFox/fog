@@ -17,14 +17,14 @@ decode([H|T],Acc)->
 	{{1,Channel},Rest0} = binary_marshal:decode(H,sint64),
 	{{2,Cmd},Rest1} = binary_marshal:decode(Rest0,sint32),
 	R = case Cmd of 
-		?REQ_PING ->
+		?RSP_PONG ->
 			[{Cmd,Channel,<<>>}| Acc];
-		?REQ_CHANNEL ->
-			[{Cmd,Channel,<<>>}| Acc];
-		?REQ_CONNECT ->
-			{{3,Payload},_Rest2} = binary_marshal:decode(Rest1,string),
+		?RSP_CHANNEL ->
+			{{3,Payload},_Rest2} = binary_marshal:decode(Rest1,sint64),
 			[{Cmd,Channel,Payload}| Acc];
-		?REQ_DATA ->
+		?RSP_CONNECT ->	
+			[{Cmd,Channel,<<>>}| Acc];
+		?RSP_DATA ->
 			{{3,Payload},_Rest2} = binary_marshal:decode(Rest1,string),
 			[{Cmd,Channel,Payload}| Acc];
 		?REQ_CLOSE ->
@@ -40,27 +40,27 @@ unpack(<<Len:32/big, _/bits >> = Data, Acc) ->
 	<< _:32/big,Packet:Len/binary, Rest/bits >> = Data,
   	unpack(Rest,[Packet|Acc]).
 
-write(?RSP_PONG,_,_)->
+write(?REQ_PING,_,_)->
 	ID = binary_marshal:encode(1,?CMD_CHANNEL,sint64),
-	Cmd = binary_marshal:encode(2,?RSP_PONG,sint32),
+	Cmd = binary_marshal:encode(2,?REQ_PING,sint32),
 	pack(ID,Cmd,<<>>);
-write(?RSP_CHANNEL,_,Data)->
+write(?REQ_CHANNEL,_,_)->
 	ID = binary_marshal:encode(1,?CMD_CHANNEL,sint64),
-	Cmd = binary_marshal:encode(2,?RSP_CHANNEL,sint32),
-	Payload = binary_marshal:encode(3,Data,sint64),
-	pack(ID,Cmd,Payload);
-write(?RSP_CONNECT,Channel,_)->
-	ID = binary_marshal:encode(1,Channel,sint64),
-	Cmd = binary_marshal:encode(2,?RSP_CONNECT,sint32),
+	Cmd = binary_marshal:encode(2,?REQ_CHANNEL,sint32),
 	pack(ID,Cmd,<<>>);
-write(?RSP_DATA,Channel,Data)->
+write(?REQ_CONNECT,Channel,Data)->
 	ID = binary_marshal:encode(1,Channel,sint64),
-	Cmd = binary_marshal:encode(2,?RSP_DATA,sint32),
+	Cmd = binary_marshal:encode(2,?REQ_CONNECT,sint32),
 	Payload = binary_marshal:encode(3,Data,string),
 	pack(ID,Cmd,Payload);
-write(?RSP_CLOSE,Channel,_)->
+write(?REQ_DATA,Channel,Data)->
 	ID = binary_marshal:encode(1,Channel,sint64),
-	Cmd = binary_marshal:encode(2,?RSP_CLOSE,sint32),
+	Cmd = binary_marshal:encode(2,?REQ_DATA,sint32),
+	Payload = binary_marshal:encode(3,Data,string),
+	pack(ID,Cmd,Payload);
+write(?REQ_CLOSE,Channel,_)->
+	ID = binary_marshal:encode(1,Channel,sint64),
+	Cmd = binary_marshal:encode(2,?REQ_CLOSE,sint32),
 	pack(ID,Cmd,<<>>).
 
 pack(ID,Cmd,Payload)->
