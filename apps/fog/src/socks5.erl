@@ -97,7 +97,8 @@ doCmd(Cmd, _, State) ->
 get_address_port(ATYP, Transport, Socket) ->
     case ATYP of
         ?IPV4 -> 
-            Transport:recv(Socket, 6, ?TIMEOUT);
+           % Transport:recv(Socket, 6, ?TIMEOUT);
+            throw(address_not_supported);
         ?IPV6 -> 
            % Transport:recv(Socket, 18, ?TIMEOUT);
            throw(address_not_supported);

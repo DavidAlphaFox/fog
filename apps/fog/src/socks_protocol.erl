@@ -40,15 +40,18 @@ init(Ref, Socket, Transport, _Opts) ->
         {error,Reason}->
             lager:log(error,?MODULE,"SOCKS Closed")
     end.
-
+loop(ok)->
+	ok;
 loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) ->
     inet:setopts(ISocket, [{active, once}]),
     {OK, Closed, Error} = Transport:messages(),
     receive
         {OK, ISocket, Data} ->
+		%	lager:log(error,?MODULE,"in data:~p",[Data]),
             fog_multiplex:to_princess(ID, Data),
             ?MODULE:loop(State);
         {to_client,Data} ->
+			%lager:log(error,?MODULE,"out data:~p",[Data]),
             Transport:send(ISocket, Data),
             ?MODULE:loop(State);
         {Closed, ISocket} ->
