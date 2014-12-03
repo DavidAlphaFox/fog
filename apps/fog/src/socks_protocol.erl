@@ -5,8 +5,7 @@
 -export([start_link/4, 
          init/4]).
 
--export([connect/3, 
-         pretty_address/1]).
+-export([pretty_address/1]).
 -export([loop/1]).
 
 -include("socks.hrl").
@@ -18,14 +17,15 @@ start_link(Ref, Socket, Transport, Opts) ->
 init(Ref, Socket, Transport, _Opts) ->
     ok = ranch:accept_ack(Ref),
     {ok, {Addr, Port}} = inet:peername(Socket),
-    ID = generator_worker:gen_id(),
     State = #state{
                    auth_methods = [?AUTH_NOAUTH], 
                    transport = Transport, 
                    client_ip = Addr,
                    client_port = Port,
                    incoming_socket = Socket,
-                   id = ID
+                   id = undefined,
+                   buffer = <<>>,
+                   connected = false
                 },
     R = Transport:recv(Socket, 1, ?TIMEOUT),
     case R of
@@ -47,31 +47,35 @@ loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) -
     {OK, Closed, Error} = Transport:messages(),
     receive
         {OK, ISocket, Data} ->
-		%	lager:log(error,?MODULE,"in data:~p",[Data]),
-            fog_multiplex:to_princess(ID, Data),
-            ?MODULE:loop(State);
-        {to_client,Data} ->
-			%lager:log(error,?MODULE,"out data:~p",[Data]),
+            NewState = case State#state.connected of
+                true ->
+                    fog_multiplex:recv_data(ID, Data),
+                    State;
+                false ->
+                    Buffer = State#state.buffer,
+                    State#state{buffer = <<Buffer/bits,Data/bits>>}
+                end,
+            ?MODULE:loop(NewState);
+        {connect} ->
+            Buffer = State#state.buffer,
+            fog_multiplex:recv_data(ID,Buffer),
+            NewState = State#state{buffer = <<>>,connected = true},
+            ?MODULE:loop(NewState);
+        {recv_data,Data} ->
             Transport:send(ISocket, Data),
             ?MODULE:loop(State);
         {Closed, ISocket} ->
+            fog_multiplex:close(ID),
             lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]);
-        {remote_close} ->
+        {close} ->
             Transport:close(ISocket);
         {Error, ISocket, Reason} ->
+            fog_multiplex:close(ID),
             lager:log(error,?MODULE,"incoming socket: ~p", [Reason]),
             lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port])
-    end.
-
-connect(Transport, Addr, Port) ->
-    connect(Transport, Addr, Port, 2).
-
-connect(Transport, Addr, Port, 0) ->
-    Transport:connect(Addr, Port, []);
-connect(Transport, Addr, Port, Ret) ->
-    case Transport:connect(Addr, Port, []) of
-        {ok, OSocket} -> {ok, OSocket};
-        {error, _} -> connect(Transport, Addr, Port, Ret-1)
+        after ?TIMEOUT ->
+           fog_multiplex:close(ID), 
+           Transport:close(ISocket)
     end.
 
 pretty_address(Addr) when is_tuple(Addr) ->

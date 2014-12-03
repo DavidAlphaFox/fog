@@ -26,14 +26,10 @@ start_link() ->
 init([]) ->
 	RestartStrategy = {one_for_one, 5, 10},
 
-	GenConf = fog_config:get(gen),
-	GeneratorMFA = {generator_worker, start_link, [GenConf]},                                                                
- 	GeneratorWorker = {generator_worker,GeneratorMFA,permanent,5000,worker,[]}, 
-
  	RemoteConf = fog_config:get(remote),
  	MultiplexMFA = {fog_multiplex,start_link,[RemoteConf]},
  	MultiplexWorker = {fog_multiplex,MultiplexMFA,permanent,5000,worker,[]}, 
 
-	Children = [GeneratorWorker,MultiplexWorker],
+	Children = [MultiplexWorker],
   {ok, { RestartStrategy,Children} }.
 

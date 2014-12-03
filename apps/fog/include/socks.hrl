@@ -4,7 +4,9 @@
     client_port :: inet:port_number(),
     auth_methods :: list(),
     transport :: module(),
-    id :: integer()
+    id :: integer(),
+    buffer,
+    connected
 }).
 
 -define(TIMEOUT, timer:seconds(5)).
