@@ -19,7 +19,7 @@
 		 terminate/2, code_change/3]).
 -export([connect/3,channel/1,recv_data/2]).
 -define(SERVER, ?MODULE).
--define(TIMEOUT, timer:seconds(5)).
+-define(TIMEOUT, timer:seconds(30)).
 -record(state, {
 	ip,
 	port,
