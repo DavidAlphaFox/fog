@@ -66,11 +66,10 @@ loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) -
             Transport:send(ISocket, Data),
             ?MODULE:loop(State);
         {Closed, ISocket} ->
-            lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]);
+            lager:log(info,?MODULE,"incoming ~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]);
         {close} ->
             Transport:close(ISocket);
         {Error, ISocket, Reason} ->
-            fog_multiplex:close(ID),
             lager:log(error,?MODULE,"incoming socket: ~p", [Reason]),
             lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port])
         after ?TIMEOUT -> 

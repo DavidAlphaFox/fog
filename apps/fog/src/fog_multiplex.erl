@@ -9,7 +9,6 @@
 -module(fog_multiplex).
 
 -behaviour(gen_server).
--include("socks.hrl").
 -include ("priv/protocol.hrl").
 
 %% API
@@ -20,7 +19,7 @@
 		 terminate/2, code_change/3]).
 -export([connect/3,channel/1,recv_data/2]).
 -define(SERVER, ?MODULE).
-
+-define(TIMEOUT, timer:seconds(5)).
 -record(state, {
 	ip,
 	port,
@@ -41,16 +40,15 @@ channel(Pid)->
             gen_server:cast(?SERVER,{cancel_channel,Pid}),
             receive
                 {channel, Channel} -> 
-                	Channel;
+                	Channel
                 after 0 -> 
                     throw({channel_timeout})
-                end
             end
     end.
 connect(ID,Address,Port) ->
 	gen_server:cast(?SERVER,{connect,ID,Address,Port}).
 recv_data(ID,Data)->
-	gen_server:cast(?SERVER,{recv_data,ID,Bin}).	
+	gen_server:cast(?SERVER,{recv_data,ID,Data}).	
 
 start_link(Args) ->
 	IP = proplists:get_value(ip,Args),
@@ -73,18 +71,6 @@ init({IP,Port,HeartBeat}) ->
 	multiplex_mapper = ets:new(multiplex_mapper, [ordered_set, protected, named_table]),   
 	{ok,State,0}.
 
-handle_call({fetch,Pid,ID,Address,Port},_From,#state{heart_beat = HeartBeat,socket = Socket} = State)->
-
-	Packet = pack(ID,1,Data),
-	Result = ranch_ssl:send(Socket,Packet),
-	case Result of
-		ok ->
-			hm_misc:monitor(Pid,multiplex_monitor),
-			ets:insert(multiplex_mapper, {ID,Pid}),
-			{reply,ok,State,HeartBeat};
-		{error,Error}->
-			{reply,{error,Error},State,HeartBeat}
-	end;
 handle_call(_Request, _From, State) ->
 	Reply = ok,
 	{reply, Reply, State}.
@@ -101,7 +87,7 @@ handle_cast({connect,ID,Address,Port},#state{connected = true,heart_beat = Heart
 		_:_Reason ->
 			ok
 		end,
-	{noreply,NewState,HeartBeat};
+	{noreply,State,HeartBeat};
 handle_cast({recv_data,ID,Bin},#state{connected = true,heart_beat = HeartBeat,socket = Socket} = State)->
 	Packet = protocol_marshal:write(?REQ_DATA,ID,Bin),
 	try
@@ -110,7 +96,7 @@ handle_cast({recv_data,ID,Bin},#state{connected = true,heart_beat = HeartBeat,so
 		_:_Reason ->
 			ok
 		end,
-	{noreply,NewState,HeartBeat};
+	{noreply,State,HeartBeat};
 
 handle_cast({channel,Pid},#state{connected = true,heart_beat = HeartBeat,waiting = Waiting,socket = Socket} = State)->
 	NewWaiting = queue:in(Pid, Waiting),
@@ -121,7 +107,7 @@ handle_cast({channel,Pid},#state{connected = true,heart_beat = HeartBeat,waiting
 
 handle_cast({cancel_channel,Pid},#state{heart_beat = HeartBeat,waiting = Waiting} = State)->
 	NewWaiting = queue:filter(
-                     fun(Waiting) -> Waiting =/= Pid end,
+                     fun(Q) -> Q =/= Pid end,
                      Waiting),
 	NewState = State#state{waiting = NewWaiting},
 	{noreply, NewState,HeartBeat};
@@ -158,7 +144,7 @@ handle_info(timeout,#state{ip = IP,port = Port,connected = false,heart_beat = He
 handle_info(timeout,#state{connected = true,heart_beat = HeartBeat,miss = Miss,socket = Socket} = State)->
 	Packet = protocol_marshal:write(?REQ_PING,undefined,undefined),
 	ranch_ssl:send(Socket,Packet),
-	{noreply,NewState,HeartBeat};
+	{noreply,State,HeartBeat};
 
 handle_info({'DOWN', _MonitorRef, process, Pid, _Info},#state{heart_beat = HeartBeat,socket = Socket} = State) -> 
 	hm_misc:demonitor(Pid,multiplex_monitor),
@@ -186,6 +172,7 @@ handle_info(_Info, State) ->
 	{noreply, State}.
 
 terminate(_Reason, _State) ->
+	io:format("Die Die~n"),
 	ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -199,13 +186,13 @@ disptach(Waiting,Channel)->
 				true ->
 					erlang:send(Pid,{channel,Channel}),
 					hm_misc:monitor(Pid,multiplex_monitor),
-					ets:insert(multiplex_mapper, {ID,Pid}),
-					{reply,NewWaiting};
+					ets:insert(multiplex_mapper, {Channel,Pid}),
+					{ok,NewWaiting};
 				_->
 					{again,NewWaiting}
 			end;
 		_->
-			{empty,NewWaiting}
+			{ok,Waiting}
 	end,
 	case R of
 		again ->
@@ -250,14 +237,14 @@ process([H|T],State)->
 				[{ID,Pid}]->
 					hm_misc:demonitor(Pid,multiplex_monitor),
 					Pid ! {close},
-					{undefined,State}
+					{ok,State}
 				end
 		end,
-	NewState2 = case Data of
+	NewState2 = case R of
 		ok ->
 			NewState;
 		_ ->
-			ranch_ssl:send(Socket,Data),
+			ranch_ssl:send(Socket,R),
 			NewState
 	end,
 	process(T,NewState2).
