@@ -126,7 +126,8 @@ handle_info({ssl, Socket, Bin},#state{heart_beat = HeartBeat,socket = Socket,buf
   {noreply,NewState1,HeartBeat};
 
 handle_info({ssl_closed, Socket}, #state{socket = Socket} = State) ->
-  {stop, ssl_closed, State};
+	lager:log(info,?MODULE,"Remote Close"),
+	{stop, ssl_closed, State};
 
 
 handle_info(timeout,#state{ip = IP,port = Port,connected = false,heart_beat = HeartBeat} = State )->
@@ -170,7 +171,8 @@ handle_info({'DOWN', _MonitorRef, process, Pid, _Info},#state{heart_beat = Heart
 	end;
 
 handle_info(_Info, State) ->
-	{noreply, State}.
+	HeartBeat = State#state.heart_beat,
+	{noreply, State,HeartBeat}.
 
 terminate(_Reason, _State) ->
 	io:format("Die Die~n"),
