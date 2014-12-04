@@ -72,8 +72,6 @@ loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) -
         {Error, ISocket, Reason} ->
             lager:log(error,?MODULE,"incoming socket: ~p", [Reason]),
             lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port])
-        after ?TIMEOUT -> 
-           Transport:close(ISocket)
     end.
 
 pretty_address(Addr) when is_tuple(Addr) ->
