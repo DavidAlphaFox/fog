@@ -16,6 +16,7 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 init(Ref, Socket, Transport, _Opts) ->
     ok = ranch:accept_ack(Ref),
+    link(whereis(fog_multiplex)),
     {ok, {Addr, Port}} = inet:peername(Socket),
     State = #state{
                    auth_methods = [?AUTH_NOAUTH], 
@@ -65,7 +66,6 @@ loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) -
             Transport:send(ISocket, Data),
             ?MODULE:loop(State);
         {Closed, ISocket} ->
-            fog_multiplex:close(ID),
             lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port]);
         {close} ->
             Transport:close(ISocket);
@@ -73,8 +73,7 @@ loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) -
             fog_multiplex:close(ID),
             lager:log(error,?MODULE,"incoming socket: ~p", [Reason]),
             lager:log(info,?MODULE,"~p:~p closed!", [pretty_address(State#state.client_ip), State#state.client_port])
-        after ?TIMEOUT ->
-           fog_multiplex:close(ID), 
+        after ?TIMEOUT -> 
            Transport:close(ISocket)
     end.
 

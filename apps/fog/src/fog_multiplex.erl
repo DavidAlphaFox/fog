@@ -9,6 +9,8 @@
 -module(fog_multiplex).
 
 -behaviour(gen_server).
+-include("socks.hrl").
+-include ("priv/protocol.hrl").
 
 %% API
 -export([start_link/1]).
@@ -16,7 +18,7 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 		 terminate/2, code_change/3]).
--export([connect/3,channel/1,recv_data/2,close/1]).
+-export([connect/3,channel/1,recv_data/2]).
 -define(SERVER, ?MODULE).
 
 -record(state, {
@@ -25,9 +27,30 @@
 	connected,
 	heart_beat,
 	miss,
+	waiting,
 	socket,
 	buff
 	}).
+
+channel(Pid)->
+	gen_server:cast(?SERVER,{channel,Pid}),
+    receive
+    	{channel, Channel} -> 
+    		{ok,Channel}
+        after ?TIMEOUT ->
+            gen_server:cast(?SERVER,{cancel_channel,Pid}),
+            receive
+                {channel, Channel} -> 
+                	Channel;
+                after 0 -> 
+                    throw({channel_timeout})
+                end
+            end
+    end.
+connect(ID,Address,Port) ->
+	gen_server:cast(?SERVER,{connect,ID,Address,Port}).
+recv_data(ID,Data)->
+	gen_server:cast(?SERVER,{recv_data,ID,Bin}).	
 
 start_link(Args) ->
 	IP = proplists:get_value(ip,Args),
@@ -42,6 +65,7 @@ init({IP,Port,HeartBeat}) ->
 		connected = false,
 		heart_beat = HeartBeat,
 		miss = 0,
+		waiting = queue:new(),
 		socket = undefined,
 		buff = <<>>
 	},
@@ -50,10 +74,7 @@ init({IP,Port,HeartBeat}) ->
 	{ok,State,0}.
 
 handle_call({fetch,Pid,ID,Address,Port},_From,#state{heart_beat = HeartBeat,socket = Socket} = State)->
-	{AType,Address2} = Address,
-	Addr = <<Address2/binary>>,
-	AddrLen = erlang:byte_size(Addr), 
-	Data = <<AType:8,AddrLen:32/big,Addr/binary,Port:16/big>>,
+
 	Packet = pack(ID,1,Data),
 	Result = ranch_ssl:send(Socket,Packet),
 	case Result of
@@ -68,28 +89,54 @@ handle_call(_Request, _From, State) ->
 	Reply = ok,
 	{reply, Reply, State}.
 
+handle_cast({connect,ID,Address,Port},#state{connected = true,heart_beat = HeartBeat,socket = Socket} = State)->
+	{AType,Address2} = Address,
+	Addr = <<Address2/binary>>,
+	AddrLen = erlang:byte_size(Addr), 
+	Data = <<AType:8,AddrLen:32/big,Addr/binary,Port:16/big>>,
+	Packet = protocol_marshal:write(?REQ_CONNECT,ID,Data),
+	try
+		ranch_ssl:send(Socket,Packet)
+	catch
+		_:_Reason ->
+			ok
+		end,
+	{noreply,NewState,HeartBeat};
+handle_cast({recv_data,ID,Bin},#state{connected = true,heart_beat = HeartBeat,socket = Socket} = State)->
+	Packet = protocol_marshal:write(?REQ_DATA,ID,Bin),
+	try
+		ranch_ssl:send(Socket,Packet)
+	catch
+		_:_Reason ->
+			ok
+		end,
+	{noreply,NewState,HeartBeat};
 
-handle_cast({to_princess,ID,Bin},#state{heart_beat = HeartBeat,socket = Socket} = State)->
-	Packet = pack(ID,2,Bin),
-	Result = ranch_ssl:send(Socket,Packet),
-	case Result of
-		ok ->
-			ok;
-		{error,_Error}->
-			remote_close(ID)
-	end,
-	{noreply, State,HeartBeat};
+handle_cast({channel,Pid},#state{connected = true,heart_beat = HeartBeat,waiting = Waiting,socket = Socket} = State)->
+	NewWaiting = queue:in(Pid, Waiting),
+	Packet = protocol_marshal:write(?REQ_CHANNEL,undefined,undefined),
+	ranch_ssl:send(Socket,Packet),
+	NewState = State#state{waiting = NewWaiting},
+	{noreply, NewState,HeartBeat};
+
+handle_cast({cancel_channel,Pid},#state{heart_beat = HeartBeat,waiting = Waiting} = State)->
+	NewWaiting = queue:filter(
+                     fun(Waiting) -> Waiting =/= Pid end,
+                     Waiting),
+	NewState = State#state{waiting = NewWaiting},
+	{noreply, NewState,HeartBeat};
+
 handle_cast(_Msg, State) ->
 	{noreply, State}.
 	
 handle_info({ssl, Socket, Bin},#state{heart_beat = HeartBeat,socket = Socket,buff = Buff} = State) ->
   % Flow control: enable forwarding of next TCP message
   ok = ranch_ssl:setopts(Socket, [{active, false}]),
-  {Packet,NewBuff} = unpack(<<Buff/bits,Bin/bits>>,[]),
-  StateBuff = State#state{buff = NewBuff},
-  NewState = packet(Packet,StateBuff),
+  {Cmds,NewBuff} = protocol_marshal:read(<<Buff/bits,Bin/bits>>),
+  NewState = process(Cmds,State),
   ok = ranch_ssl:setopts(Socket, [{active, once}]),
-  {noreply,NewState,HeartBeat};
+  NewState1 = NewState#state{buff = NewBuff},
+  {noreply,NewState1,HeartBeat};
 
 handle_info({ssl_closed, Socket}, #state{socket = Socket} = State) ->
   {stop, ssl_closed, State};
@@ -103,43 +150,114 @@ handle_info(timeout,#state{ip = IP,port = Port,connected = false,heart_beat = He
 			ok = ranch_ssl:setopts(Socket, [{active, once}]),
 			State#state{connected = true,socket = Socket};
 		{error,Error}->
-			lager:log(info,?MODULE,"Connect to ~s:~p fail. Reason: ~p~n",[IP,Port,Error]),
+			lager:log(error,?MODULE,"Connect to ~s:~p fail. Reason: ~p~n",[IP,Port,Error]),
 			State
 		end,
 	{noreply,NewState,HeartBeat};
 
 handle_info(timeout,#state{connected = true,heart_beat = HeartBeat,miss = Miss,socket = Socket} = State)->
-	lager:log(info,?MODULE,"Heart Beat"),
-	NewState = if 
-			Miss > 2 ->
-				ranch_ssl:close(Socket),
-				loop_close(),
-				State#state{connected = false,miss = 0,socket = undefined};
-			true -> 
-				Packet = pack(0,0,<<>>),
-				ranch_ssl:send(Socket,Packet),
-	 			State#state{miss = Miss + 1}
-	 		end,
+	Packet = protocol_marshal:write(?REQ_PING,undefined,undefined),
+	ranch_ssl:send(Socket,Packet),
 	{noreply,NewState,HeartBeat};
 
-handle_info({'DOWN', _MonitorRef, process, Pid, _Info},#state{socket = Socket} = State) -> 
+handle_info({'DOWN', _MonitorRef, process, Pid, _Info},#state{heart_beat = HeartBeat,socket = Socket} = State) -> 
 	hm_misc:demonitor(Pid,multiplex_monitor),
 	case ets:match_object(multiplex_mapper,{'_',Pid}) of
 		[] ->
-			{noreply,State};
+			{noreply,State,HeartBeat};
 		[{ID,Pid}] ->
-			Close = pack(ID,3,<<>>),
 			ets:delete(multiplex_mapper,ID),
-			ranch_ssl:send(Socket,Close),
-  		{noreply, State}
-  end;
+			case State#state.connected of
+				true ->
+					Packet = protocol_marshal:write(?REQ_CLOSE,ID,undefined),
+					try
+						ranch_ssl:send(Socket,Packet)
+					catch
+						_:_Reason ->
+							ok
+					end;
+				_->
+					ok
+				end,
+  			{noreply, State,HeartBeat}
+	end;
 
 handle_info(_Info, State) ->
 	{noreply, State}.
 
 terminate(_Reason, _State) ->
-	lager:log(info,?MODULE,"stop"),
 	ok.
 
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
+
+disptach(Waiting,Channel)->
+	W = queue:out(Waiting),
+	{R,NW} = case W of 
+		{{value, Pid},NewWaiting} ->
+			case erlang:is_process_alive(Pid) of
+				true ->
+					erlang:send(Pid,{channel,Channel}),
+					hm_misc:monitor(Pid,multiplex_monitor),
+					ets:insert(multiplex_mapper, {ID,Pid}),
+					{reply,NewWaiting};
+				_->
+					{again,NewWaiting}
+			end;
+		_->
+			{empty,NewWaiting}
+	end,
+	case R of
+		again ->
+			disptach(NW,Channel);
+		_->
+			NW
+	end.
+
+process([],State)->
+	State;
+process([H|T],State)->
+	Waiting = State#state.waiting,
+	Socket = State#state.socket,
+	{R,NewState} = case H of
+		{?RSP_PONG,_,_}->
+			{ok,State};
+		{?RSP_CHANNEL,_,ID} ->
+			NewWaiting = disptach(Waiting,ID),
+			{ok,State#state{waiting = NewWaiting}};
+		{?RSP_DATA,ID,Payload} ->
+			case ets:match_object(multiplex_mapper,{ID,'_'}) of
+				[] ->
+					Packet = protocol_marshal:write(?REQ_CLOSE,ID,undefined),
+					{Packet,State};
+				[{ID,Pid}]->
+					Pid ! {recv_data,Payload},
+					{ok,State}
+				end;
+		{?RSP_CONNECT,ID,_} ->
+			case ets:match_object(multiplex_mapper,{ID,'_'}) of
+				[] ->
+					Packet = protocol_marshal:write(?REQ_CLOSE,ID,undefined),
+					{Packet,State};
+				[{ID,Pid}]->
+					Pid ! {connect},
+					{ok,State}
+			end;
+		{?RSP_CLOSE,ID,_} ->
+			case ets:match_object(multiplex_mapper,{ID,'_'}) of
+				[] ->
+					{ok,State};
+				[{ID,Pid}]->
+					hm_misc:demonitor(Pid,multiplex_monitor),
+					Pid ! {close},
+					{undefined,State}
+				end
+		end,
+	NewState2 = case Data of
+		ok ->
+			NewState;
+		_ ->
+			ranch_ssl:send(Socket,Data),
+			NewState
+	end,
+	process(T,NewState2).
