@@ -113,7 +113,8 @@ handle_cast({cancel_channel,Pid},#state{heart_beat = HeartBeat,waiting = Waiting
 	{noreply, NewState,HeartBeat};
 
 handle_cast(_Msg, State) ->
-	{noreply, State}.
+	HeartBeat = State#state.heart_beat,
+	{noreply, State,HeartBeat}.
 	
 handle_info({ssl, Socket, Bin},#state{heart_beat = HeartBeat,socket = Socket,buff = Buff} = State) ->
   % Flow control: enable forwarding of next TCP message
