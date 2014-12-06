@@ -16,8 +16,9 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 init(Ref, Socket, Transport, _Opts) ->
     ok = ranch:accept_ack(Ref),
-    link(whereis(fog_multiplex)),
     {ok, {Addr, Port}} = inet:peername(Socket),
+    {ok,Multiplex} = fog_lb:lock_one(),
+    link(Multiplex),
     State = #state{
                    auth_methods = [?AUTH_NOAUTH], 
                    transport = Transport, 
@@ -26,7 +27,8 @@ init(Ref, Socket, Transport, _Opts) ->
                    incoming_socket = Socket,
                    id = undefined,
                    buffer = <<>>,
-                   connected = false
+                   connected = false,
+                   multiplex = Multiplex
                 },
     R = Transport:recv(Socket, 1, ?TIMEOUT),
     case R of
@@ -43,14 +45,14 @@ init(Ref, Socket, Transport, _Opts) ->
     end.
 loop(ok)->
 	ok;
-loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) ->
+loop(#state{transport = Transport, incoming_socket = ISocket,id = ID,multiplex = Multiplex} = State) ->
     inet:setopts(ISocket, [{active, once}]),
     {OK, Closed, Error} = Transport:messages(),
     receive
         {OK, ISocket, Data} ->
             NewState = case State#state.connected of
                 true ->
-                    fog_multiplex:recv_data(ID, Data),
+                    fog_multiplex:recv_data(Multiplex,ID, Data),
                     State;
                 false ->
                     Buffer = State#state.buffer,
@@ -59,7 +61,7 @@ loop(#state{transport = Transport, incoming_socket = ISocket,id = ID} = State) -
             ?MODULE:loop(NewState);
         {connect} ->
             Buffer = State#state.buffer,
-            fog_multiplex:recv_data(ID,Buffer),
+            fog_multiplex:recv_data(Multiplex,ID,Buffer),
             NewState = State#state{buffer = <<>>,connected = true},
             ?MODULE:loop(NewState);
         {recv_data,Data} ->

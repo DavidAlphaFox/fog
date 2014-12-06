@@ -64,8 +64,7 @@ doAuth(Data, #state{auth_methods = AuthMethods, transport = Transport, incoming_
 cmd(#state{transport = Transport, incoming_socket = ISocket} = State) ->
     try
     	{ok, <<?VERSION, CMD, ?RSV, ATYP>>} = Transport:recv(ISocket, 4, ?TIMEOUT),
-        Pid = self(),
-        {ok,Channel} = fog_id:channel(Pid),
+        {ok,Channel} = fog_id:channel(),
         NewState = State#state{id = Channel},
         {ok, NewState2} = doCmd(CMD, ATYP, NewState),
         NewState2
@@ -76,10 +75,10 @@ cmd(#state{transport = Transport, incoming_socket = ISocket} = State) ->
                                                    State#state.client_port, Reason])
     end.
 
-doCmd(?CMD_CONNECT, ATYP, #state{transport = Transport, incoming_socket = ISocket,id = ID} = State) ->
+doCmd(?CMD_CONNECT, ATYP, #state{transport = Transport, incoming_socket = ISocket,id = ID,multiplex = Multiplex} = State) ->
     {ok, Data} = get_address_port(ATYP, Transport, ISocket),
     {Addr, Port} = parse_addr_port(ATYP, Data),
-    fog_multiplex:connect(ID,Addr,Port),
+    fog_multiplex:connect(Multiplex,ID,Addr,Port),
     {AType,Address} = Addr,
     lager:log(info,?MODULE,"~p:~p connected to ~p:~p Type:~p", [socks_protocol:pretty_address(State#state.client_ip), 
                                             State#state.client_port,

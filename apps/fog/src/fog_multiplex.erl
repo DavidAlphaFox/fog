@@ -17,7 +17,7 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 		 terminate/2, code_change/3]).
--export([connect/3,recv_data/2]).
+-export([connect/4,recv_data/3]).
 -define(SERVER, ?MODULE).
 -define(TIMEOUT, timer:seconds(30)).
 -record(state, {
@@ -27,20 +27,22 @@
 	heart_beat,
 	miss,
 	socket,
-	buff
+	buff,
+	socks_monitor,
+	socks_mapper
 	}).
 
-connect(ID,Address,Port) ->
+connect(Multiplex,ID,Address,Port) ->
     Pid = self(),
-	gen_server:cast(?SERVER,{connect,Pid,ID,Address,Port}).
-recv_data(ID,Data)->
-	gen_server:cast(?SERVER,{recv_data,ID,Data}).	
+	gen_server:cast(Multiplex,{connect,Pid,ID,Address,Port}).
+recv_data(Multiplex,ID,Data)->
+	gen_server:cast(Multiplex,{recv_data,ID,Data}).	
 
 start_link(Args) ->
 	IP = proplists:get_value(ip,Args),
 	Port = proplists:get_value(port,Args),
 	HeartBeat = proplists:get_value(heart_beat,Args),
-	gen_server:start_link({local, ?SERVER}, ?MODULE, {IP,Port,HeartBeat}, []).
+	gen_server:start_link(?MODULE, {IP,Port,HeartBeat}, []).
 
 init({IP,Port,HeartBeat}) ->
 	State = #state{
@@ -50,10 +52,10 @@ init({IP,Port,HeartBeat}) ->
 		heart_beat = HeartBeat,
 		miss = 0,
 		socket = undefined,
-		buff = <<>>
-	},
-	multiplex_monitor = ets:new(multiplex_monitor, [ordered_set, protected, named_table]),   
-	multiplex_mapper = ets:new(multiplex_mapper, [ordered_set, protected, named_table]),   
+		buff = <<>>,
+		socks_monitor = ets:new(socks_monitor, [ordered_set, protected]), 
+		socks_mapper = ets:new(socks_mapper, [ordered_set, protected])
+	},  
 	{ok,State,0}.
 
 handle_call(_Request, _From, State) ->
@@ -61,8 +63,8 @@ handle_call(_Request, _From, State) ->
 	{reply, Reply, State}.
 
 handle_cast({connect,Pid,ID,Address,Port},#state{connected = true,heart_beat = HeartBeat,socket = Socket} = State)->
-	hm_misc:monitor(Pid,multiplex_monitor),
-	ets:insert(multiplex_mapper, {ID,Pid}),
+	ets:insert(State#state.socks_mapper, {ID,Pid}),
+	hm_misc:monitor(Pid,State#state.socks_mapper),
 	{AType,Address2} = Address,
 	Addr = <<Address2/binary>>,
 	AddrLen = erlang:byte_size(Addr), 
@@ -109,6 +111,7 @@ handle_info(timeout,#state{ip = IP,port = Port,connected = false,heart_beat = He
 	NewState = case Result of
 		{ok,Socket}->
 			ok = ranch_ssl:setopts(Socket, [{active, once}]),
+			fog_lb:enqueue(),
 			State#state{connected = true,socket = Socket};
 		{error,Error}->
 			lager:log(error,?MODULE,"Connect to ~s:~p fail. Reason: ~p~n",[IP,Port,Error]),
@@ -122,12 +125,12 @@ handle_info(timeout,#state{connected = true,heart_beat = HeartBeat,miss = Miss,s
 	{noreply,State,HeartBeat};
 
 handle_info({'DOWN', _MonitorRef, process, Pid, _Info},#state{heart_beat = HeartBeat,socket = Socket} = State) -> 
-	hm_misc:demonitor(Pid,multiplex_monitor),
-	case ets:match_object(multiplex_mapper,{'_',Pid}) of
+	hm_misc:demonitor(Pid,State#state.socks_monitor),
+	case ets:match_object(State#state.socks_mapper,{'_',Pid}) of
 		[] ->
 			{noreply,State,HeartBeat};
 		[{ID,Pid}] ->
-			ets:delete(multiplex_mapper,ID),
+			ets:delete(State#state.socks_mapper,ID),
 			case State#state.connected of
 				true ->
 					Packet = protocol_marshal:write(?REQ_CLOSE,ID,undefined),
@@ -163,7 +166,7 @@ process([H|T],State)->
 		{?RSP_PONG,_,_}->
 			{ok,State};
 		{?RSP_DATA,ID,Payload} ->
-			case ets:match_object(multiplex_mapper,{ID,'_'}) of
+			case ets:match_object(State#state.socks_mapper,{ID,'_'}) of
 				[] ->
 					Packet = protocol_marshal:write(?REQ_CLOSE,ID,undefined),
 					{Packet,State};
@@ -172,7 +175,7 @@ process([H|T],State)->
 					{ok,State}
 				end;
 		{?RSP_CONNECT,ID,_} ->
-			case ets:match_object(multiplex_mapper,{ID,'_'}) of
+			case ets:match_object(State#state.socks_mapper,{ID,'_'}) of
 				[] ->
 					Packet = protocol_marshal:write(?REQ_CLOSE,ID,undefined),
 					{Packet,State};
@@ -181,11 +184,11 @@ process([H|T],State)->
 					{ok,State}
 			end;
 		{?RSP_CLOSE,ID,_} ->
-			case ets:match_object(multiplex_mapper,{ID,'_'}) of
+			case ets:match_object(State#state.socks_mapper,{ID,'_'}) of
 				[] ->
 					{ok,State};
 				[{ID,Pid}]->
-					hm_misc:demonitor(Pid,multiplex_monitor),
+					hm_misc:demonitor(Pid,State#state.socks_monitor),
 					Pid ! {close},
 					{ok,State}
 				end

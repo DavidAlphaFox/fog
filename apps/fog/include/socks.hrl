@@ -6,7 +6,8 @@
     transport :: module(),
     id :: integer(),
     buffer,
-    connected
+    connected,
+    multiplex
 }).
 
 -define(TIMEOUT, timer:seconds(5)).

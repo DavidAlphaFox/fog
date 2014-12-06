@@ -1,5 +1,5 @@
 
--module(fog_sup).
+-module(fog_multiplex_sup).
 
 -behaviour(supervisor).
 
@@ -27,15 +27,10 @@ init([]) ->
 	RestartStrategy = {one_for_one, 5, 10},
 
  	RemoteConf = fog_config:get(remote),
- 	IDMFA = {fog_id,start_link,[RemoteConf]},
- 	IDWorker = {fog_id,IDMFA,permanent,5000,worker,[]}, 
-
- 	BalanceMFA = {fog_lb,start_link,[[]]},
- 	BalanceWorker = {fog_lb,BalanceMFA,permanent,5000,worker,[]}, 
-
- 	MultiplexSupMFA = {fog_multiplex_sup,start_link,[]},
- 	MultiplexSupervisor = {fog_multiplex_sup,MultiplexSupMFA,permanent,5000,supervisor,[]},
-
-	Children = [IDWorker,BalanceWorker,MultiplexSupervisor],
-  {ok, { RestartStrategy,Children} }.
+ 	Workers = proplists:get_value(workers,RemoteConf),
+ 	MultiplexMFA = {fog_multiplex,start_link,[RemoteConf]}, 
+	Children = [
+		{{fog_multiplex, N},MultiplexMFA, permanent, brutal_kill, worker, []}
+			|| N <- lists:seq(1, Workers)],
+  	{ok, { RestartStrategy,Children} }.
 
