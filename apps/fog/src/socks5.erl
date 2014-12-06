@@ -65,7 +65,7 @@ cmd(#state{transport = Transport, incoming_socket = ISocket} = State) ->
     try
     	{ok, <<?VERSION, CMD, ?RSV, ATYP>>} = Transport:recv(ISocket, 4, ?TIMEOUT),
         Pid = self(),
-        {ok,Channel} = fog_multiplex:channel(Pid),
+        {ok,Channel} = fog_id:channel(Pid),
         NewState = State#state{id = Channel},
         {ok, NewState2} = doCmd(CMD, ATYP, NewState),
         NewState2

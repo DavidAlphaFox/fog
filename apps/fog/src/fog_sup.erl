@@ -27,9 +27,11 @@ init([]) ->
 	RestartStrategy = {one_for_one, 5, 10},
 
  	RemoteConf = fog_config:get(remote),
+ 	IDMFA = {fog_id,start_link,[RemoteConf]},
+ 	IDWorker = {fog_id,IDMFA,permanent,5000,worker,[]}, 
  	MultiplexMFA = {fog_multiplex,start_link,[RemoteConf]},
  	MultiplexWorker = {fog_multiplex,MultiplexMFA,permanent,5000,worker,[]}, 
 
-	Children = [MultiplexWorker],
+	Children = [IDWorker,MultiplexWorker],
   {ok, { RestartStrategy,Children} }.
 
